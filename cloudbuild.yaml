@@ -1,0 +1,10 @@
+steps:
+  # 1. Install dependencies from requirements.txt
+  - name: 'gcr.io/cloud-builders/pip'
+    args: ['install', '-r', 'requirements.txt']
+
+  # 2. Deploy the current directory to App Engine using app.yaml
+  - name: 'gcr.io/cloud-builders/gcloud'
+    args: ['app', 'deploy']
+
+timeout: '1600s'
