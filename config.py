@@ -18,4 +18,4 @@ class Config:
     # Disable SQLAlchemy event system to save memory, as we don't need it for this simple app
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
-   
+   ##
