@@ -1,78 +1,98 @@
-from flask import Flask, render_template, request, redirect, url_for
-import mysql.connector
+# app.py
+from flask import Flask
+from extensions import db, login_manager
+from datetime import datetime, timezone
 import os
-# --- MODIFIED FOR GCP ---
-# We no longer need python-dotenv, App Engine will provide environment variables.
+
+# --- GCP ADAPTATION: Import Secret Manager client ---
 from google.cloud import secretmanager
 
-app = Flask(__name__)
+# --- GCP ADAPTATION: dotenv is no longer used in production ---
+# load_dotenv() is removed.
 
-# --- ADDED FOR GCP: Securely fetch credentials ---
-project_id = os.environ.get("GCP_PROJECT")
-db_password_secret_name = os.environ.get("DB_SECRET_NAME")
-
+# --- GCP ADAPTATION: Function to securely fetch the database password ---
 def get_db_password():
-    """Fetches the database password from Secret Manager."""
+    """Fetches the database password from Google Cloud Secret Manager."""
     try:
+        # These environment variables will be set in app.yaml
+        project_id = os.environ.get("GCP_PROJECT")
+        secret_name = os.environ.get("DB_SECRET_NAME")
+
+        if not project_id or not secret_name:
+            print("GCP_PROJECT or DB_SECRET_NAME environment variables not set.")
+            return None
+
         client = secretmanager.SecretManagerServiceClient()
-        name = f"projects/{project_id}/secrets/{db_password_secret_name}/versions/latest"
+        # Build the resource name of the secret version
+        name = f"projects/{project_id}/secrets/{secret_name}/versions/latest"
+        # Access the secret version
         response = client.access_secret_version(request={"name": name})
+        # Return the decoded secret payload
         return response.payload.data.decode("UTF-8")
     except Exception as e:
-        # In a real app, you'd have more robust error handling and logging
-        print(f"Error fetching secret: {e}")
+        # In a real production app, you would log this error
+        print(f"Error fetching secret from Secret Manager: {e}")
         return None
 
-# --- MODIFIED FOR GCP: Database configuration from Environment Variables ---
-DB_CONFIG = {
-    'user': os.getenv('DB_USER'),
-    'password': get_db_password(), # Fetch the password securely
-    'host': os.getenv('DB_HOST'),   # This will be the Private IP of your Cloud SQL instance
-    'database': os.getenv('DB_NAME'),
-}
+# Initialise Flask application
+app = Flask(__name__)
 
-def get_db_connection():
-    """Establishes a connection to the database."""
-    # The password check is now implicitly handled by get_db_password() returning None on failure
-    if not all(DB_CONFIG.values()):
-         raise ConnectionError("Database configuration is incomplete. Check environment variables.")
-    conn = mysql.connector.connect(**DB_CONFIG)
-    return conn
+# --- GCP ADAPTATION: Build the database URI and configure the app directly ---
+# We no longer use the Config class from config.py for the database URI.
 
-def init_db():
-    """Initializes the database and creates the 'jobs' table if it doesn't exist."""
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS jobs (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                job_title VARCHAR(255) NOT NULL,
-                company_name VARCHAR(255) NOT NULL,
-                location VARCHAR(255),
-                job_type VARCHAR(50),
-                posted_date DATE,
-                job_description TEXT,
-                is_active BOOLEAN DEFAULT TRUE
-            );
-        """)
-        conn.commit()
-        cursor.close()
-        conn.close()
-    except mysql.connector.Error as err:
-        print(f"Error initializing database: {err}")
+# 1. Fetch all the necessary components for the connection string
+db_user = os.environ.get('DB_USER')
+db_pass = get_db_password() # Securely fetched password
+db_host = os.environ.get('DB_HOST') # The private IP of your Cloud SQL instance
+db_name = os.environ.get('DB_NAME')
 
-# Your routes (@app.route(...)) remain exactly the same.
-# I have omitted them here for brevity, but you should keep them in your file.
-# ... (Keep all your existing @app.route functions here) ...
-# Make sure to call init_db() before the app runs
+# 2. Set the application's secret key for session management
+# This should be a long, random string. For production, this should also be in Secret Manager.
+# For this project, setting it as an environment variable is sufficient.
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'a-default-fallback-secret-key')
 
-if __name__ == '__main__':
-    # The init_db call can be placed here for local development
-    # In a production App Engine environment, it will be called once on startup.
-    init_db()
-    app.run(debug=True)
+# 3. Construct the SQLAlchemy Database URI
+# Format: mysql+mysqlconnector://<user>:<password>@<host>/<dbname>
+if all([db_user, db_pass, db_host, db_name]):
+    app.config['SQLALCHEMY_DATABASE_URI'] = (
+        f"mysql+mysqlconnector://{db_user}:{db_pass}@{db_host}/{db_name}"
+    )
 else:
-    # This is what Gunicorn will run.
-    # Initialize the database when the application starts in production.
-    init_db()
+    print("Database connection details are missing. Check environment variables.")
+    # You might want to handle this more gracefully, but for now, we'll print an error.
+    app.config['SQLALCHEMY_DATABASE_URI'] = None
+
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+# Initialise extensions with the Flask app
+db.init_app(app)
+login_manager.init_app(app)
+
+# Configure Login Manager (this logic remains the same)
+login_manager.login_view = 'login'
+login_manager.login_message_category = 'info'
+
+# Import models and routes after initialising to avoid circular imports
+# This structure remains the same
+from models import User, Job
+from routes import *
+
+# This block ensures that database tables are created if they don't exist.
+# This is excellent practice and should be kept.
+with app.app_context():
+    if app.config['SQLALCHEMY_DATABASE_URI']:
+        db.create_all()
+    else:
+        print("Skipping db.create_all() because database URI is not configured.")
+
+# This context processor remains the same
+@app.context_processor
+def inject_now():
+    return {'now': datetime.now(timezone.utc)}
+
+# This block is for local development and will not be used by Gunicorn in production
+if __name__ == '__main__':
+    # Note: For local testing, you would need to set the environment variables manually
+    # or use a different method to load them.
+    port = int(os.environ.get('PORT', 8080))
+    app.run(debug=False, host='0.0.0.0', port=port)
