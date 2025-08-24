@@ -1,0 +1,20 @@
+runtime: python39
+env_variables:
+  GCP_PROJECT: 'brit-edge'
+  DB_SECRET_NAME: 'db-password'
+  DB_USER: 'root'
+  DB_NAME: 'job_schedule_db'
+  DB_HOST: '10.214.248.2v' # 
+
+#  networking for private SQL connection ---
+vpc_access_connector:
+  name: 'projects/brit-edge/locations/europe-west2/connectors/britedge-app-connector'
+
+#  startup command ---
+entrypoint: gunicorn -b :$PORT 'app:app'
+
+# --- Scaling and performance settings ---
+automatic_scaling:
+  min_instances: 0
+  max_instances: 5
+  target_cpu_utilization: 0.75
