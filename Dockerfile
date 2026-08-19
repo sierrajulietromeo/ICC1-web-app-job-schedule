@@ -1,6 +1,6 @@
 FROM python:3.12-slim
 
-
+ENV FLASK_APP=application.py
 
 # Set work directory
 WORKDIR /app

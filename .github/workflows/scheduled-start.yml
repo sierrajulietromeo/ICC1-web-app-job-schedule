@@ -1,0 +1,17 @@
+name: Start non-prod apps weekday mornings
+
+on:
+  schedule:
+    - cron: '0 7 * * 1-5'
+  workflow_dispatch:
+
+jobs:
+  start:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - run: |
+          az webapp start --name job-app-britedge-staging-taisiia --resource-group britedge-uk-rg
+          az webapp start --name job-app-britedge-dev-taisiia --resource-group britedge-uk-rg
